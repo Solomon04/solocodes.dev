@@ -1,0 +1,499 @@
+import { ArticleLayout } from '@/components/ArticleLayout'
+import Image from 'next/future/image'
+import notionNextImage from './notion-nextjs.jpeg'
+
+export const meta = {
+  author: 'Solomon Antoine',
+  date: '2022-01-27',
+  title: 'Build a NextJS blog powered by the Notion API',
+  description: 'In this tutorial, I will demonstrate how you can use the NotionAPI in conjunction with NextJS & TailwindCSS to power your blog.',
+}
+
+export default (props) => <ArticleLayout meta={meta} {...props} />
+
+<Image src={notionNextImage} alt="" />
+
+## Introduction
+Notion has been a game changer when it comes to my personal life. It allows me to manage everything from documenting goals, to journaling my thoughts. Because of this, I figured I’d use Notion to power my personal blog over a tool like WordPress for the convenience of not having to ever leave Notion. In this tutorial, I will demonstrate how you can use the NotionAPI in conjunction with NextJS & TailwindCSS to power your blog.
+
+## Setup Notion
+
+Make sure you have a Notion account, note you can use their free tier for this tutorial.
+
+### Create a Notion Integration
+
+Go to [https://www.notion.so/my-integrations](https://www.notion.so/my-integrations) and create a new internal integration
+
+### Create a Notion Database Page
+
+![Screen Shot 2022-01-23 at 16.41.42.png](https://github.com/Solomon04/nextjs-notion-blog/blob/main/database-screenshot.png?raw=true)
+
+You can duplicate the template [here](https://www.notion.so/7d731261948c470dac0b14d286f15a77).
+
+### Grant Integration access to Blog
+
+Click the share button and give your integration access.
+
+![Screen Shot 2022-01-20 at 21.48.19.png](https://github.com/Solomon04/nextjs-notion-blog/blob/main/access-screenshot.png?raw=true)
+
+
+
+## Create Project
+
+### Create NextJS Application
+
+```bash
+$ npx create-next-app mysite --typescript
+```
+
+### Install TailwindCSS
+
+```bash
+npm install -D tailwindcss postcss autoprefixer @tailwindcss/typography
+npx tailwindcss init -p
+```
+
+## Setup Project
+
+### Edit Tailwind Config
+
+Go to your `tailwind.config.js` file and add the following:
+
+```jsx
+module.exports = {
+    content: [
+        "./pages/**/*.{js,ts,jsx,tsx}",
+        "./components/**/*.{js,ts,jsx,tsx}",
+    ],
+    theme: {
+        extend: {},
+        fontFamily: {
+            sans: ["'Montserrat'"],
+            mono: ["'Inconsolata'"]
+        }
+    },
+    plugins: [
+        require('@tailwindcss/typography')
+    ],
+}
+```
+
+### Add Tailwind CSS to Global.css file
+
+```css
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+```
+
+### Add Document.tsx
+
+In order to make use of our custom fonts, we need to create a new file called `pages/_document.tsx` with the following information
+
+```jsx
+import Document, {Html, Head, Main, NextScript, DocumentContext} from 'next/document'
+
+class MyDocument extends Document {
+    static async getInitialProps(ctx: DocumentContext) {
+        const initialProps = await Document.getInitialProps(ctx)
+        return {...initialProps}
+    }
+
+    render() {
+        return (
+            <Html>
+                <Head>
+                    <link rel="preconnect" href="https://fonts.googleapis.com"/>
+                    <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin={'true'}/>
+                    <link
+                        href="https://fonts.googleapis.com/css2?family=Inconsolata:wght@200;300;400;500;600;700;800;900&family=Montserrat:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,100;1,200;1,300;1,400;1,500;1,600;1,700;1,800;1,900&display=swap"
+                        rel="stylesheet"/>
+                </Head>
+                <body>
+                <Main/>
+                <NextScript/>
+                </body>
+            </Html>
+        )
+    }
+}
+
+export default MyDocument
+```
+
+### Add .env file
+
+Create a new file called `.env.local` with the following info:
+
+```
+NOTION_ACCESS_TOKEN=
+NOTION_BLOG_DATABASE_ID=
+```
+
+For the `NOTION_ACCESS_TOKEN` we can go to our integrate and copy the secret key
+
+![Screen Shot 2022-01-20 at 22.20.08.png](https://github.com/Solomon04/nextjs-notion-blog/blob/main/access-token-screenshot.png?raw=true)
+
+For the `NOTION_BLOG_DATABASE_ID` we can copy the uuid within the url
+
+![Screen Shot 2022-01-20 at 22.21.28.png](https://github.com/Solomon04/nextjs-notion-blog/blob/main/url-screenshot.png?raw=true)
+
+### Add Types File
+
+Create a new file called `@types/schema.d.ts` and add the following:
+
+```jsx
+export type Tag = {
+    color: string
+    id: string
+    name: string
+}
+
+export type BlogPost = {
+    id: string;
+    slug: string;
+    cover: string;
+    title: string;
+    tags: Tag[];
+    description: string;
+    date: string
+}
+```
+
+## Build the project
+
+### Install Notion Client & Markdown
+
+We need to install the Notion Javascript client in order to get the blog data and a couple other packages for display purposes
+
+```jsx
+npm install @notionhq/client notion-to-md react-markdown
+```
+
+### Create Custom Notion Service
+
+```jsx
+import {Client} from "@notionhq/client";
+import {BlogPost, PostPage} from "../@types/schema";
+import {NotionToMarkdown} from "notion-to-md";
+
+export default class NotionService {
+    client: Client
+    n2m: NotionToMarkdown;
+
+    constructor() {
+        this.client = new Client({ auth: process.env.NOTION_ACCESS_TOKEN });
+        this.n2m = new NotionToMarkdown({ notionClient: this.client });
+    }
+
+    async getPublishedBlogPosts(): Promise<BlogPost[]> {
+        const database = process.env.NOTION_BLOG_DATABASE_ID ?? '';
+        // list blog posts
+        const response = await this.client.databases.query({
+            database_id: database,
+            filter: {
+                property: 'Published',
+                checkbox: {
+                    equals: true
+                }
+            },
+            sorts: [
+                {
+                    property: 'Updated',
+                    direction: 'descending'
+                }
+            ]
+        });
+
+        return response.results.map(res => {
+            return NotionService.pageToPostTransformer(res);
+        })
+    }
+
+    async getSingleBlogPost(slug: string): Promise<PostPage> {
+        let post, markdown
+
+        const database = process.env.NOTION_BLOG_DATABASE_ID ?? '';
+        // list of blog posts
+        const response = await this.client.databases.query({
+            database_id: database,
+            filter: {
+                property: 'Slug',
+                formula: {
+                    text: {
+                        equals: slug // slug
+                    }
+                },
+                // add option for tags in the future
+            },
+            sorts: [
+                {
+                    property: 'Updated',
+                    direction: 'descending'
+                }
+            ]
+        });
+
+        if (!response.results[0]) {
+            throw 'No results available'
+        }
+
+        // grab page from notion
+        const page = response.results[0];
+
+        const mdBlocks = await this.n2m.pageToMarkdown(page.id)
+        markdown = this.n2m.toMarkdownString(mdBlocks);
+        post = NotionService.pageToPostTransformer(page);
+
+        return {
+            post,
+            markdown
+        }
+    }
+
+    private static pageToPostTransformer(page: any): BlogPost {
+        let cover = page.cover;
+        switch (cover) {
+            case 'file':
+                cover = page.cover.file
+                break;
+            case 'external':
+                cover = page.cover.external.url;
+                break;
+            default:
+                // Add default cover image if you want...
+                cover = ''
+        }
+
+        return {
+            id: page.id,
+            cover: cover,
+            title: page.properties.Name.title[0].plain_text,
+            tags: page.properties.Tags.multi_select,
+            description: page.properties.Description.rich_text[0].plain_text,
+            date: page.properties.Updated.last_edited_time,
+            slug: page.properties.Slug.formula.string
+        }
+    }
+}
+```
+
+### Edit Index file
+
+First we want to make use of the `staticProps` method like so:
+
+```jsx
+import {GetStaticProps, InferGetStaticPropsType} from "next";
+import Head from "next/head";
+import {BlogPost} from "../@types/schema";
+import NotionService from "../services/notion-service";
+
+export const getStaticProps: GetStaticProps = async (context) => {
+    const notionService = new NotionService();
+    const posts = await notionService.getPublishedBlogPosts()
+
+    return {
+        props: {
+            posts
+        },
+    }
+}
+
+const Home = ({posts}: InferGetStaticPropsType<typeof getStaticProps>) => {
+    const title = 'Test Blog';
+    const description = 'Welcome to my Notion Blog.'
+
+    return (
+        <>
+            <Head>
+                <title>{title}</title>
+                <meta name={"description"} title={"description"} content={description}/>
+                <meta name={"og:title"} title={"og:title"} content={title}/>
+                <meta name={"og:description"} title={"og:description"} content={title}/>
+            </Head>
+
+            <div className="min-h-screen">
+                <main className="max-w-5xl mx-auto relative">
+                    <div className="h-full pt-4 pb-16 px-4 md:px-0 mx-auto">
+                        <div className="flex items-center justify-center">
+                            <h1 className="font-extrabold text-xl md:text-4xl text-black text-center">Notion + NextJS Sample Blog</h1>
+                        </div>
+                        <div className="mt-12 max-w-lg mx-auto grid gap-5 lg:grid-cols-2 lg:max-w-none">
+                            {posts.map((post: BlogPost) => (
+                                <p key={post.id}>Blog Post Component Here: {post.title}</p>
+                            ))}
+                        </div>
+                    </div>
+                </main>
+            </div>
+        </>
+    )
+};
+
+export default Home;
+```
+
+### Blog Card Component
+
+Next, we want to create a component for a Blog card
+
+First install dayjs for morphing dates
+
+```jsx
+$ npm install dayjs
+```
+
+the create a file `components/BlogCard.tsx`
+
+```jsx
+import {FunctionComponent} from "react";
+import Link from "next/link";
+import {BlogPost} from "../@types/schema";
+import dayjs from 'dayjs'
+
+type BlogCardProps = {
+    post: BlogPost
+}
+const localizedFormat = require('dayjs/plugin/localizedFormat');
+dayjs.extend(localizedFormat)
+
+const BlogCard: FunctionComponent<BlogCardProps> = ({post}) => {
+
+    return (
+        <Link href={`/post/${post.slug}`}>
+            <a className="transition duration-300 hover:scale-105">
+                <div key={post.title} className="flex flex-col rounded-xl shadow-lg overflow-hidden">
+                    <div className="flex-shrink-0">
+                        <img className="h-64 w-full object-fit" src={post.cover} alt="" />
+                    </div>
+                    <div className="flex-1 bg-gray-50 pt-2 pb-6 px-4 flex flex-col justify-between">
+                        <div className="flex-1">
+                            <span className="block mt-2">
+                                <h4 className="text-xs font-medium text-gray-600">{dayjs(post.date).format('LL')}</h4>
+                            </span>
+                            <span className="block mt-2">
+                                <h3 className="text-xl font-semibold text-gray-900">{post.title}</h3>
+                            </span>
+
+                            <span className="block mt-2">
+                                <p className="text-sm text-gray-600">{post.description}</p>
+                            </span>
+
+                            <span className="block mt-2 space-x-4">
+                                {
+                                    post.tags.map(tag => (
+                                        <span key={tag.id} className='bg-green-300 text-green-800 px-2 py-1 text-xs rounded-lg'>
+														                #{tag.name}
+														            </span>
+                                    ))
+                                }
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            </a>
+        </Link>
+    );
+};
+
+export default BlogCard;
+```
+
+Then replace
+
+```jsx
+<p>Blog Post Component Here: {post.title}</p>
+```
+
+with
+
+```jsx
+import BlogCard from "../components/BlogCard";
+
+<BlogCard key={post.id} post={post}/>
+```
+
+in the index file.
+
+### Create Post File
+
+Next, we want to create the page for displaying single blog posts, by making a file called `post/[slug].tsx` where we will make us of dynamic parameters.
+
+<aside>
+💡 We will be making use of both *`getStaticPaths` and `getStaticProps`* which means you will have to redeploy your site whenever you make a change in Notion since we are generating static paths.
+
+</aside>
+
+```jsx
+import {GetStaticProps, InferGetStaticPropsType} from "next";
+import ReactMarkdown from "react-markdown";
+import Head from "next/head";
+import NotionService from "../../services/notion-service";
+
+const Post = ({markdown, post}: InferGetStaticPropsType<typeof getStaticProps>) => {
+    return (
+        <>
+            <Head>
+                <title>{post.title}</title>
+                <meta name={"description"} title={"description"} content={post.description}/>
+                <meta name={"og:title"} title={"og:title"} content={post.title}/>
+                <meta name={"og:description"} title={"og:description"} content={post.description}/>
+                <meta name={"og:image"} title={"og:image"} content={post.cover}/>
+            </Head>
+
+            <div className="min-h-screen">
+                <main className="max-w-5xl mx-auto relative">
+                    <div className="flex items-center justify-center">
+                        <article className="prose">
+                            <ReactMarkdown>{markdown}</ReactMarkdown>
+                        </article>
+                    </div>
+                </main>
+            </div>
+
+        </>
+    )
+}
+
+export const getStaticProps: GetStaticProps = async (context) => {
+    const notionService = new NotionService()
+
+    // @ts-ignore
+    const p = await notionService.getSingleBlogPost(context.params?.slug)
+
+    if (!p) {
+        throw ''
+    }
+
+    return {
+        props: {
+            markdown: p.markdown,
+            post: p.post
+        },
+    }
+}
+
+export async function getStaticPaths() {
+    const notionService = new NotionService()
+
+    const posts = await notionService.getPublishedBlogPosts()
+
+    // Because we are generating static paths, you will have to redeploy your site whenever
+    // you make a change in Notion.
+    const paths = posts.map(post => {
+        return `/post/${post.slug}`
+    })
+
+    return {
+        paths,
+        fallback: false,
+    }
+}
+
+export default Post;
+```
+
+## Recap
+
+In conclusion, Notion is powerful tool that you can use for replacing your CMS applications. If you found this tutorial useful, considering subscribing to my YouTube channel where I record
+programming content on the regular or follow me on Twitter.
