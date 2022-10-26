@@ -19,7 +19,7 @@ export default function Home({articles}) {
                 </title>
                 <meta
                     name="description"
-                    content="I’m Solomon, a software designer and entrepreneur currently.  I’m a co-founder of GoodRun, where we help customers book indoor court rentals and find pickup basketball games. 🏀"
+                    content="I’m Solomon, a software designer and entrepreneur. I’m a co-founder of GoodRun, where we help customers book indoor court rentals and find pickup basketball games. 🏀"
                 />
             </Head>
             <Container className="mt-9">
@@ -28,7 +28,7 @@ export default function Home({articles}) {
                         Software engineer, founder, and nomad ✈️
                     </h1>
                     <p className="mt-6 text-base text-zinc-600 dark:text-zinc-400">
-                        I’m Solomon, a software designer and entrepreneur currently.
+                        I’m Solomon, a software designer and entrepreneur.
                         I’m a co-founder of GoodRun, where we help customers book indoor court rentals and find pickup
                         basketball games. 🏀
                     </p>
